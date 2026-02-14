@@ -28,7 +28,6 @@
             overflow: hidden;
         }
 
-        /* Glassmorphism Card */
         .card {
             background: var(--card-bg);
             backdrop-filter: blur(15px);
@@ -134,7 +133,6 @@
         const hrSeries = new TimeSeries();
         const brSeries = new TimeSeries();
 
-        // Initialize Charts
         function createChart(id, series, color) {
             const chart = new SmoothieChart({
                 grid: { strokeStyle: 'transparent', verticalSections: 0, borderVisible: false },
@@ -148,21 +146,18 @@
         createChart('hr-chart', hrSeries, '#ff2d55');
         createChart('br-chart', brSeries, '#00ccff');
 
-        // Connection Handling
         socket.on('connect', () => {
             document.getElementById('status').innerHTML = '● Live Signal';
             document.getElementById('status').style.color = '#34c759';
         });
 
-        // Data & Pulse Logic
         socket.on('update_data', (data) => {
             document.getElementById('hr-val').innerText = data.hr;
             document.getElementById('br-val').innerText = data.br;
 
-            // Restart Animation
             const heart = document.getElementById('heart-icon');
             heart.classList.remove('animate-pulse');
-            void heart.offsetWidth; // Force Reflow
+            void heart.offsetWidth; 
             heart.classList.add('animate-pulse');
 
             const now = new Date().getTime();

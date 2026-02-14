@@ -25,12 +25,12 @@ def index():
 
 def simulator():
     while True:
-        # Simulate realistic heart and breathing drift
+        # Simulation
         hr = random.randint(72, 76)
         br = random.randint(14, 16)
         
         sio.emit('update_data', {'hr': hr, 'br': br})
-        eventlet.sleep(1) # Frequency of pulse
+        eventlet.sleep(1)
 
 if __name__ == '__main__':
     app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
