@@ -1,0 +1,87 @@
+#include <Wire.h>
+#include "MAX30105.h"
+#include "heartRate.h"
+
+MAX30105 particleSensor;
+
+const byte RATE_SIZE = 12; 
+byte rates[RATE_SIZE]; 
+byte rateSpot = 0;
+long lastBeat = 0;
+float beatsPerMinute = 0;
+int beatAvg = 0;
+
+// Flag to track when a finger first touches the sensor
+bool fingerPresent = false; 
+
+void setup() {
+  Serial.begin(115200);
+  
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+    Serial.println("Sensor_Error");
+    while (1);
+  }
+
+  particleSensor.setup(); 
+  particleSensor.setPulseAmplitudeRed(0x0A); 
+  particleSensor.setPulseAmplitudeGreen(0);  
+}
+
+void loop() {
+  long irValue = particleSensor.getIR();
+
+  // STAGE 1: Physical Presence Check (Air vs Finger)
+  if (irValue < 30000) {
+    // Reset everything
+    beatAvg = 0;
+    rateSpot = 0;
+    fingerPresent = false;
+    for (byte x = 0; x < RATE_SIZE; x++) rates[x] = 0;
+    
+    // KEEP AXES CONSTANT, BUT HIDE THE DATA
+    // Printing NAN (Not A Number) tells the plotter to leave a blank gap
+    Serial.print("BPM:NAN,");
+    Serial.print("IR:"); Serial.println(irValue);
+    
+    delay(50); // Tiny delay to prevent serial spam
+    return;    // Skip beat detection until finger returns
+  }
+
+  // STAGE 2: Fresh Finger Initialization
+  if (fingerPresent == false) {
+    lastBeat = millis(); // Reset the clock so we don't calculate a huge time gap
+    fingerPresent = true;
+  }
+
+  // STAGE 3: Beat Detection
+  if (checkForBeat(irValue) == true) {
+    long delta = millis() - lastBeat;
+    lastBeat = millis();
+
+    // Prevent divide-by-zero crashes
+    if (delta > 0) { 
+      beatsPerMinute = 60.0 / (delta / 1000.0);
+
+      // STAGE 4: Biological Range Filter (40-200 BPM)
+      if (beatsPerMinute < 200 && beatsPerMinute > 40) {
+        
+        // Instant-fill the array if it's the very first valid beat
+        if (rates[0] == 0) {
+          for (byte x = 0; x < RATE_SIZE; x++) rates[x] = (byte)beatsPerMinute;
+        } else {
+          rates[rateSpot++] = (byte)beatsPerMinute;
+          rateSpot %= RATE_SIZE;
+        }
+
+        // Calculate the Average
+        beatAvg = 0;
+        for (byte x = 0 ; x < RATE_SIZE ; x++) beatAvg += rates[x];
+        beatAvg /= RATE_SIZE;
+      }
+    }
+  }
+
+  // FINAL OUTPUT: Always prints perfectly formatted for the Plotter
+  Serial.print("BPM:"); Serial.print(beatAvg);
+  Serial.print(",IR:"); Serial.println(irValue);
+}
