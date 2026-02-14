@@ -1,7 +1,6 @@
-import socketio
-import eventlet
-import eventlet.wsgi
 from flask import Flask, send_from_directory
+from flask_socketio import SocketIO
+import eventlet
 import random
 import socket
 
@@ -16,12 +15,16 @@ def get_ip():
         return "127.0.0.1"
 
 local_ip = get_ip()
-sio = socketio.Server(cors_allowed_origins='*')
-app = Flask(__name__)
+app = Flask(__name__, static_folder='.', static_url_path='')
+sio = SocketIO(app, cors_allowed_origins='*')
 
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    return send_from_directory('.', path)
 
 def simulator():
     while True:
@@ -33,7 +36,6 @@ def simulator():
         eventlet.sleep(1)
 
 if __name__ == '__main__':
-    app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
     eventlet.spawn(simulator)
     
     print("\n" + "="*30)
@@ -41,4 +43,4 @@ if __name__ == '__main__':
     print(f"URL: http://{local_ip}:5000")
     print("="*30 + "\n")
     
-    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app)
+    sio.run(app, host='0.0.0.0', port=5000)
