@@ -13,7 +13,6 @@
         body {
             margin: 0;
             font-family: 'Inter', sans-serif;
-            /* Apple Mesh Gradient Background */
             background: radial-gradient(at 0% 0%, #ffdee9 0%, transparent 50%),
                         radial-gradient(at 100% 0%, #b5fffc 0%, transparent 50%),
                         radial-gradient(at 100% 100%, #e0c3fc 0%, transparent 50%),
@@ -28,12 +27,8 @@
             min-height: 100vh;
         }
 
-        .container {
-            width: 100%;
-            max-width: 360px;
-        }
+        .container { width: 100%; max-width: 360px; }
 
-        /* Liquid Glass Containers */
         .card, .model-container {
             background: rgba(255, 255, 255, 0.2);
             backdrop-filter: blur(25px) saturate(180%);
@@ -48,7 +43,6 @@
 
         .model-container { height: 300px; }
         .card { padding: 24px; box-sizing: border-box; }
-
         #canvas-container { width: 100%; height: 100%; }
 
         .label {
@@ -59,47 +53,31 @@
             margin-bottom: 5px;
         }
 
-        .value-text {
-            font-size: 52px;
-            font-weight: 900;
-            margin: 0;
-        }
-
-        #hr-val { color: #d73a49; }
-        #br-val { color: #0366d6; }
+        .value-text { font-size: 52px; font-weight: 900; margin: 0; }
+        #hr-val { color: #f2a7b5; } /* Softer Red */
+        #ir-val { color: #7db9f2; } /* Softer Blue */
 
         canvas.data-chart {
-        width: 100% !important;
-        height: 80px !important;
-        /* Remove solid background, use subtle glass tint instead */
-        background: rgba(255, 255, 255, 0.05) !important;
-        margin-top: 15px;
-        border-radius: 12px;
-        /* Adds a slight inner border to define the chart area within the glass */
-        border: 1px solid rgba(255, 255, 255, 0.1);
-    }
+            width: 100% !important;
+            height: 80px !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+            margin-top: 15px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
 
         #status {
-            font-weight: 700;
-            margin-bottom: 15px;
-            padding: 8px 20px;
-            background: rgba(255, 255, 255, 0.5);
-            backdrop-filter: blur(10px);
-            border-radius: 50px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            font-weight: 700; margin-bottom: 15px; padding: 8px 20px;
+            background: rgba(255, 255, 255, 0.5); backdrop-filter: blur(10px);
+            border-radius: 50px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
             border: 1px solid rgba(255, 255, 255, 0.3);
         }
 
         #loading-indicator {
-            position: absolute;
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            color: #666;
-            font-size: 14px;
-            z-index: 100;
-            pointer-events: none;
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); color: #666;
+            font-size: 14px; z-index: 100; pointer-events: none;
         }
-
         #loading-indicator.hidden { display: none; }
     </style>
 </head>
@@ -120,9 +98,9 @@
         </div>
 
         <div class="card">
-            <div class="label">Respiration (RPM)</div>
-            <div id="br-val" class="value-text">--</div>
-            <canvas id="br-chart" class="data-chart"></canvas>
+            <div class="label">Signal Intensity (IR)</div>
+            <div id="ir-val" class="value-text">--</div>
+            <canvas id="ir-chart" class="data-chart"></canvas>
         </div>
     </div>
 
@@ -142,7 +120,7 @@
 
         const socket = io();
         const hrSeries = new TimeSeries();
-        const brSeries = new TimeSeries();
+        const irSeries = new TimeSeries();
 
         let scene, camera, renderer, controls, model, mixer;
         let clock = new THREE.Clock();
@@ -150,7 +128,7 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = null; // Essential for glass effect
+            scene.background = null;
 
             const container = document.getElementById('canvas-container');
             camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
@@ -171,7 +149,6 @@
             
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
-            controls.enableZoom = true;
             
             loadModel();
             animate();
@@ -182,33 +159,21 @@
             const loader = new GLTFLoader();
             loader.load('models/heart.glb', (gltf) => {
                 model = gltf.scene;
-
-                // --- SUPER TRANSLUCENT GLASS OVERRIDE ---
                 model.traverse((child) => {
                     if (child.isMesh) {
                         child.material = new THREE.MeshPhysicalMaterial({
-                            // Desaturated Apple Rose and Soft Azure
                             color: child.name.toLowerCase().includes('blue') ? 0x7db9f2 : 0xf2a7b5, 
-                            metalness: 0.05,
-                            roughness: 0.02,
-                            transmission: 0.95, 
-                            ior: 1.45,
-                            thickness: 0.8,
-                            transparent: true,
-                            opacity: 0.6, 
-                            clearcoat: 1.0
+                            metalness: 0.05, roughness: 0.02, transmission: 0.95, 
+                            ior: 1.45, thickness: 0.8, transparent: true, opacity: 0.6, clearcoat: 1.0
                         });
                     }
                 });
-
                 scene.add(model);
                 const box = new THREE.Box3().setFromObject(model);
                 const center = box.getCenter(new THREE.Vector3());
                 model.position.sub(center);
-                
                 const size = box.getSize(new THREE.Vector3());
-                const maxDim = Math.max(size.x, size.y, size.z);
-                const scale = 3.2 / maxDim;
+                const scale = 3.2 / Math.max(size.x, size.y, size.z);
                 model.scale.multiplyScalar(scale);
 
                 if (gltf.animations.length > 0) {
@@ -221,30 +186,29 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            if (mixer) mixer.update(delta);
-            
+            if (mixer) mixer.update(clock.getDelta());
             if (model) {
                 heartScale += (targetScale - heartScale) * scaleLerpSpeed;
-                model.scale.setScalar(3.2 / 1.0 * heartScale);
+                model.scale.setScalar(3.2 * heartScale);
             }
-
             controls.update();
             renderer.render(scene, camera);
         }
 
-        function initChart(id, series, color) {
+        function initChart(id, series, color, isIR) {
             const chart = new SmoothieChart({
-                grid: { strokeStyle: 'rgba(0,0,0,0.05)', verticalSections: 0, borderVisible: false },
+                grid: { strokeStyle: 'rgba(255,255,255,0.1)', verticalSections: 0, borderVisible: false },
                 labels: { disabled: true },
-                maxValue: 120, minValue: 40
+                // Adjust scale for IR values (typically 30k-100k) vs BPM (40-200)
+                maxValue: isIR ? 150000 : 150, 
+                minValue: isIR ? 0 : 40
             });
             chart.addTimeSeries(series, { strokeStyle: color, lineWidth: 4 });
             chart.streamTo(document.getElementById(id), 1000);
         }
 
-        initChart('hr-chart', hrSeries, '#d73a49');
-        initChart('br-chart', brSeries, '#0366d6');
+        initChart('hr-chart', hrSeries, '#f2a7b5', false);
+        initChart('ir-chart', irSeries, '#7db9f2', true);
 
         socket.on('connect', () => {
             document.getElementById('status').innerText = "● SYSTEM ACTIVE";
@@ -253,12 +217,16 @@
 
         socket.on('update_data', (data) => {
             document.getElementById('hr-val').innerText = data.hr;
-            document.getElementById('br-val').innerText = data.br;
-            targetScale = 1.15;
-            setTimeout(() => targetScale = 1.0, 150);
+            document.getElementById('ir-val').innerText = data.ir;
+            
+            if(data.hr > 0) {
+                targetScale = 1.15;
+                setTimeout(() => targetScale = 1.0, 150);
+            }
+            
             const now = new Date().getTime();
             hrSeries.append(now, data.hr);
-            brSeries.append(now, data.br);
+            irSeries.append(now, data.ir);
         });
 
         function onWindowResize() {

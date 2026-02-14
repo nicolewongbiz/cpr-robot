@@ -26,6 +26,10 @@ def index():
 def serve_static(path):
     return send_from_directory('.', path)
 
+@app.route('/models/<path:filename>')
+def serve_models(filename):
+    return send_from_directory('models', filename)
+
 def simulator():
     while True:
         # Simulation
@@ -42,5 +46,5 @@ if __name__ == '__main__':
     print(f"BIOSTAT HUD: ONLINE")
     print(f"URL: http://{local_ip}:5000")
     print("="*30 + "\n")
-    
+     
     sio.run(app, host='0.0.0.0', port=5000)
