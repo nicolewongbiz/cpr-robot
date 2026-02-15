@@ -16,12 +16,12 @@ const int IN2_2 = 11;
 
 const int IN3_2 = 12;
 const int IN4_2 = 13;
-const int ENB2  = 10;  // PWM
+const int ENB2  = 10;
 
-// ---------------- TUNING ----------------
 const bool INVERT_LEFT  = false;
 const bool INVERT_RIGHT = false;
 
+// PWM tuning
 const int PWM_MAX = 255;
 const int PWM_DEADBAND_DEFAULT = 0;
 
@@ -47,23 +47,31 @@ const float SCALE_ENA2 = 1.00f;
 const float SCALE_ENB2 = 1.00f;
 
 // --------- Straight-line trim ---------
-float STRAIGHT_TRIM = 0.00f;   // + boosts right, - boosts left
+// + trims to the RIGHT (boost right, reduce left)
+// - trims to the LEFT  (boost left,  reduce right)
+float STRAIGHT_TRIM = 0.00f;     // try 0.02, -0.02, etc.
+// -------------------------------------
 
-// --------- Safety ---------
-const unsigned long CMD_TIMEOUT_MS = 400;   // stop if no serial cmd
-const bool AUTO_STOP_AFTER_CMD = true;      // set false if you don't want it
-const unsigned long AUTO_STOP_MS = 2000;    // stop 2s after last VEL
+// Smooth motion tuning
+const float MAX_V_ACCEL = 1.2f;
+const float MAX_V_DECEL = 2.0f;
+const float MAX_W_ACCEL = 2.0f;
+const float MAX_W_DECEL = 3.0f;
 
-const bool DEBUG = true;
+const unsigned long CMD_TIMEOUT_MS = 600;
+const unsigned long DEMO_RUN_MS = 2000;
 
-// ---------------- State ----------------
-String line;
+unsigned long last_cmd_ms = 0;
 
-unsigned long last_cmd_ms = 0;    // last time we received VEL
-float v_target = 0.0f;
-float w_target = 0.0f;
+// Targets
+float v_target = 0.0f, w_target = 0.0f;
+// Smoothed/current
+float v_now = 0.0f, w_now = 0.0f;
 
-// ---------------- Helpers ----------------
+unsigned long start_ms = 0;
+bool stopped = false;
+
+// ---------- helpers ----------
 int clampInt(int x, int lo, int hi) {
   if (x < lo) return lo;
   if (x > hi) return hi;
@@ -97,14 +105,19 @@ int shapePwm(int pwm_in, int start_pwm, float scale, int deadband) {
   return out;
 }
 
-void stopMotors() {
-  digitalWrite(IN1_1, LOW); digitalWrite(IN2_1, LOW);
-  digitalWrite(IN3_1, LOW); digitalWrite(IN4_1, LOW);
-  analogWrite(ENA1, 0); analogWrite(ENB1, 0);
+float slewToward(float now, float target, float maxUpPerSec, float maxDownPerSec, float dt) {
+  float err = target - now;
+  if (err == 0.0f) return now;
 
-  digitalWrite(IN1_2, LOW); digitalWrite(IN2_2, LOW);
-  digitalWrite(IN3_2, LOW); digitalWrite(IN4_2, LOW);
-  analogWrite(ENA2, 0); analogWrite(ENB2, 0);
+  bool increasing_mag = fabsf(target) > fabsf(now);
+  float maxStep = (increasing_mag ? maxUpPerSec : maxDownPerSec) * dt;
+
+  if (err > 0) {
+    if (err > maxStep) err = maxStep;
+  } else {
+    if (-err > maxStep) err = -maxStep;
+  }
+  return now + err;
 }
 
 void driveChannel(int inA, int inB, int en,
@@ -146,30 +159,39 @@ void setRight(float u) {
   driveChannel(IN3_2, IN4_2, ENB2, u, GAIN_ENB2, START_ENB2, SCALE_ENB2, PWM_DEADBAND_DEFAULT);
 }
 
-// Apply v,w -> left/right + straight trim
-void applyCmdVel(float v, float w) {
+void stopMotors() {
+  digitalWrite(IN1_1, LOW); digitalWrite(IN2_1, LOW);
+  digitalWrite(IN3_1, LOW); digitalWrite(IN4_1, LOW);
+  analogWrite(ENA1, 0); analogWrite(ENB1, 0);
+
+  digitalWrite(IN1_2, LOW); digitalWrite(IN2_2, LOW);
+  digitalWrite(IN3_2, LOW); digitalWrite(IN4_2, LOW);
+  analogWrite(ENA2, 0); analogWrite(ENB2, 0);
+}
+
+// Straight-line application: apply trim to left/right evenly
+void applySmoothedCmd(float v, float w) {
   float left  = v - w;
   float right = v + w;
 
+  // Straight trim: + boosts right, - boosts left
   float t = clampFloat(STRAIGHT_TRIM, -0.30f, 0.30f);
   left  *= (1.0f - t);
   right *= (1.0f + t);
 
+  // Keep within sane range
   left  = clampFloat(left,  -1.0f, 1.0f);
   right = clampFloat(right, -1.0f, 1.0f);
 
   setLeft(left);
   setRight(right);
-
-  if (DEBUG) {
-    Serial.print("ACK v="); Serial.print(v, 3);
-    Serial.print(" w="); Serial.print(w, 3);
-    Serial.print(" L="); Serial.print(left, 3);
-    Serial.print(" R="); Serial.println(right, 3);
-  }
 }
 
-// ---------------- Arduino ----------------
+void updateSmoothing(float dt) {
+  v_now = slewToward(v_now, v_target, MAX_V_ACCEL, MAX_V_DECEL, dt);
+  w_now = slewToward(w_now, w_target, MAX_W_ACCEL, MAX_W_DECEL, dt);
+}
+
 void setup() {
   pinMode(ENA1, OUTPUT);  pinMode(ENB1, OUTPUT);
   pinMode(IN1_1, OUTPUT); pinMode(IN2_1, OUTPUT);
@@ -181,64 +203,45 @@ void setup() {
 
   stopMotors();
 
-  Serial.begin(115200);
-  while (!Serial) {}
   last_cmd_ms = millis();
-
-  if (DEBUG) Serial.println("READY (send: VEL <v> <w> or STOP)");
+  start_ms = last_cmd_ms;
 }
 
 void loop() {
-  unsigned long now = millis();
+  static unsigned long last_ms = millis();
+  unsigned long now_ms = millis();
+  float dt = (now_ms - last_ms) / 1000.0f;
+  last_ms = now_ms;
 
-  // Safety: stop if no recent VEL
-  if (now - last_cmd_ms > CMD_TIMEOUT_MS) {
-    v_target = 0.0f;
-    w_target = 0.0f;
-    stopMotors();
-  }
-
-  // Optional: stop 2 seconds after last VEL command
-  if (AUTO_STOP_AFTER_CMD && (now - last_cmd_ms > AUTO_STOP_MS)) {
-    v_target = 0.0f;
-    w_target = 0.0f;
-    stopMotors();
-  }
-
-  // Read serial lines
-  while (Serial.available() > 0) {
-    char c = (char)Serial.read();
-    if (c == '\r') continue;
-
-    if (c == '\n') {
-      line.trim();
-      if (line.length() == 0) { line = ""; continue; }
-
-      if (line.startsWith("STOP")) {
-        v_target = 0.0f;
-        w_target = 0.0f;
-        stopMotors();
-        if (DEBUG) Serial.println("DONE STOP");
-      } else if (line.startsWith("VEL")) {
-        int s1 = line.indexOf(' ');
-        int s2 = (s1 >= 0) ? line.indexOf(' ', s1 + 1) : -1;
-
-        if (s1 > 0 && s2 > s1) {
-          v_target = line.substring(s1 + 1, s2).toFloat();
-          w_target = line.substring(s2 + 1).toFloat();
-
-          last_cmd_ms = now;             // refresh watchdog + auto-stop timer
-          applyCmdVel(v_target, w_target);
-        } else {
-          if (DEBUG) Serial.println("ERR format: VEL <v> <w>");
-        }
-      } else {
-        if (DEBUG) { Serial.print("ERR UNKNOWN CMD: "); Serial.println(line); }
-      }
-
-      line = "";
+  if (!stopped) {
+    if (now_ms - start_ms < 10000) {
+      // drive forward for 2 seconds
+      v_target = 0.5f;
+      w_target = 0.0f;
+      last_cmd_ms = now_ms;
     } else {
-      if (line.length() < 80) line += c;
+      // stop after 2 seconds (and stay stopped)
+      v_target = 0.0f;
+      w_target = 0.0f;
+      updateSmoothing(dt);
+      applySmoothedCmd(v_now, w_now);
+      stopMotors();
+      stopped = true;
+      return;
     }
+  } else {
+    // stay stopped forever
+    stopMotors();
+    return;
   }
+
+  // safety timeout still works (optional)
+  if (now_ms - last_cmd_ms > CMD_TIMEOUT_MS) {
+    v_target = 0.0f;
+    w_target = 0.0f;
+  }
+
+  updateSmoothing(dt);
+  applySmoothedCmd(v_now, w_now);
 }
+
