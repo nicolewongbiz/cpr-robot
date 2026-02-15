@@ -11,7 +11,6 @@ long lastBeat = 0;
 float beatsPerMinute = 0;
 int beatAvg = 0;
 
-// Flag to track when a finger first touches the sensor
 bool fingerPresent = false; 
 
 void setup() {
@@ -30,26 +29,25 @@ void setup() {
 void loop() {
   long irValue = particleSensor.getIR();
 
-  // STAGE 1: Physical Presence Check (Air vs Finger)
+  // STAGE 1: Physical Presence Check
   if (irValue < 30000) {
-    // Reset everything
     beatAvg = 0;
     rateSpot = 0;
     fingerPresent = false;
     for (byte x = 0; x < RATE_SIZE; x++) rates[x] = 0;
     
-    // KEEP AXES CONSTANT, BUT HIDE THE DATA
-    // Printing NAN (Not A Number) tells the plotter to leave a blank gap
-    Serial.print("BPM:NAN,");
-    Serial.print("IR:"); Serial.println(irValue);
+    // Send 0 for BPM and raw IR for the graph
+    Serial.print(0);
+    Serial.print(",");
+    Serial.println(irValue);
     
-    delay(50); // Tiny delay to prevent serial spam
-    return;    // Skip beat detection until finger returns
+    delay(50); 
+    return;
   }
 
   // STAGE 2: Fresh Finger Initialization
   if (fingerPresent == false) {
-    lastBeat = millis(); // Reset the clock so we don't calculate a huge time gap
+    lastBeat = millis(); 
     fingerPresent = true;
   }
 
@@ -58,14 +56,10 @@ void loop() {
     long delta = millis() - lastBeat;
     lastBeat = millis();
 
-    // Prevent divide-by-zero crashes
     if (delta > 0) { 
       beatsPerMinute = 60.0 / (delta / 1000.0);
 
-      // STAGE 4: Biological Range Filter (40-200 BPM)
       if (beatsPerMinute < 200 && beatsPerMinute > 40) {
-        
-        // Instant-fill the array if it's the very first valid beat
         if (rates[0] == 0) {
           for (byte x = 0; x < RATE_SIZE; x++) rates[x] = (byte)beatsPerMinute;
         } else {
@@ -73,7 +67,6 @@ void loop() {
           rateSpot %= RATE_SIZE;
         }
 
-        // Calculate the Average
         beatAvg = 0;
         for (byte x = 0 ; x < RATE_SIZE ; x++) beatAvg += rates[x];
         beatAvg /= RATE_SIZE;
@@ -81,7 +74,9 @@ void loop() {
     }
   }
 
-  // FINAL OUTPUT: Always prints perfectly formatted for the Plotter
-  Serial.print("BPM:"); Serial.print(beatAvg);
-  Serial.print(",IR:"); Serial.println(irValue);
+  // FINAL OUTPUT: Clean Comma Separated Values (CSV)
+  // Format: "72,95000"
+  Serial.print(beatAvg);
+  Serial.print(",");
+  Serial.println(irValue);
 }
