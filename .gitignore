@@ -5,3 +5,7 @@ __pycache__/
 .cursor/
 venv/
 .env
+*.pt
+build/
+install/
+log/
