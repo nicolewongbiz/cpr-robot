@@ -11,9 +11,9 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    yolo_port = LaunchConfiguration("yolo_udp_port", default_value="5000")
-    tag_port = LaunchConfiguration("tag_udp_port", default_value="5010")
-    publish_hz = LaunchConfiguration("publish_hz", default_value="20.0")
+    yolo_port = LaunchConfiguration("yolo_udp_port")
+    tag_port = LaunchConfiguration("tag_udp_port")
+    publish_hz = LaunchConfiguration("publish_hz")
 
     return LaunchDescription([
         DeclareLaunchArgument(
